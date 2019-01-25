@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-var ws_module = require('ws');
+var WebSocket = require('ws');
 var net = require('net');
 
 var argv = require('optimist')
@@ -18,26 +18,26 @@ var wsMask = (argv.method == 'tcp2ws');
 function initSocketCallbacks(state,ws,s) {
 
 	function flushSocketBuffer() {
-		if(state.sBuffer.length > 0) {
+		if (s.writable && state.sBuffer.length > 0) {
 			s.write(Buffer.concat(state.sBuffer));
+			state.sBuffer = null;
 		}
-		state.sBuffer = null;
 	};
 
 	function flushWebsocketBuffer() {
-		if(state.wsBuffer.length > 0) {
+		if(ws.readyState === WebSocket.OPEN && state.wsBuffer.length > 0) {
 			ws.send(Buffer.concat(state.wsBuffer),{binary: true,mask: wsMask});
+			state.wsBuffer = null;
 		}
-		state.wsBuffer = null;
 	};
 
 	s.on('close', function(had_error) {
-		ws.removeAllListeners('close');		
+		ws.removeAllListeners('close');
 		ws.close();
 	});
 
 	ws.on('close', function() {
-		s.removeAllListeners('close');	
+		s.removeAllListeners('close');
 		s.end();
 	});
 
@@ -70,19 +70,18 @@ function initSocketCallbacks(state,ws,s) {
 	});
 
 	s.on('data', function(data) {
-
-		if(! state.wsReady) {
+		if (!state.wsReady) {
 			state.wsBuffer.push(data);
-		} else {
-			ws.send(data,{binary: true,mask: wsMask});
+		} else if (ws.readyState === WebSocket.OPEN) {
+			ws.send(data, {binary: true,mask: wsMask});
 		}
 	});
 
 	ws.on('message', function(m,flags) {
 		if(!state.sReady) {
 			state.sBuffer.push(m);
-		} else {
-			s.write(m);			
+		} else if (s.writable) {
+			s.write(m);
 		}
 	});
 }
@@ -92,8 +91,8 @@ function tcp2ws() {
 	console.log('forwarding port ' + argv.lport + ' to ' + argv.rhost);
 
 	var server = net.createServer(function(s) {
-		var ws = new ws_module(argv.rhost);
-		
+		var ws = new WebSocket(argv.rhost);
+
 		var state = {
 			sReady : true,
 			wsReady : false,
@@ -110,11 +109,11 @@ function ws2tcp() {
 	console.log('proxy mode ws -> tcp');
 	console.log('forwarding port ' + argv.lport + ' to ' + argv.rhost);
 
-	wss = new ws_module.Server({port: argv.lport});
+	wss = new WebSocket.Server({port: argv.lport});
 	wss.on('connection', function(ws) {
 		var addr_port = argv.rhost.split(':');
 		var s = net.connect(addr_port[1],addr_port[0]);
-		
+
 		var state = {
 			sReady : false,
 			wsReady : true, // there is no callback so i assume its already connected
